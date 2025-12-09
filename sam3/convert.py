@@ -75,9 +75,9 @@ def convert(model_path):
     for k, v in weights.items():
         # Vision Encoder
         if "detector" in k:
-            if "backbone" in k:
+            k = k.replace("detector.", "")
+            if k.startswith("backbone."):
                 v = mx.array(v.numpy())
-                k = k.replace("detector.", "")
                 if k in {
                     "backbone.vision_backbone.convs.0.dconv_2x2_0.weight",
                     "backbone.vision_backbone.convs.0.dconv_2x2_1.weight",
@@ -102,7 +102,20 @@ def convert(model_path):
 
                 if k.endswith("in_proj_weight") or k.endswith("in_proj_bias"):
                     update_attn_keys(k, mlx_weights)
-    
+
+            # transformer encoder, decoder
+            elif k.startswith("transformer."):
+                v = mx.array(v.numpy())
+
+                mlx_weights[k] = v
+                if k.endswith("in_proj_weight") or k.endswith("in_proj_bias"):
+                    update_attn_keys(k, mlx_weights)
+            
+            # dot product scoring mlp layer
+            elif k.startswith("dot_prod_scoring."):
+                v = mx.array(v.numpy())
+                mlx_weights[k] = v
+     
     return mlx_weights 
 
 

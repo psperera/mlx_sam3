@@ -1,9 +1,11 @@
 import math
-import copy
 from functools import partial
 from typing import Optional, Tuple, Type, Union
+
+import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
+from mlx.utils import tree_map_with_path
 
 def inverse_sigmoid(x, eps=1e-3):
     x = mx.clip(x, 0, 1)
@@ -46,6 +48,62 @@ class MultiheadAttentionWrapper(nn.MultiHeadAttention):
         return super().__call__(*args, **kwargs)
 
 
+class DotProductScoring(nn.Module):
+    def __init__(
+        self,
+        d_model,
+        d_proj,
+        prompt_mlp=None,
+        clamp_logits=True,
+        clamp_max_val=12.0,
+    ):
+        super().__init__()
+        self.d_proj = d_proj
+        assert isinstance(prompt_mlp, nn.Module) or prompt_mlp is None
+        self.prompt_mlp = prompt_mlp  # an optional MLP projection for prompt
+        self.prompt_proj = nn.Linear(d_model, d_proj)
+        self.hs_proj = nn.Linear(d_model, d_proj)
+        self.scale = float(1.0 / np.sqrt(d_proj))
+        self.clamp_logits = clamp_logits
+        if self.clamp_logits:
+            self.clamp_max_val = clamp_max_val
+    
+    def mean_pool_text(self, prompt, prompt_mask):
+        # is_valid has shape (seq, bs, 1), where 1 is valid and 0 is padding
+        is_valid = (~prompt_mask).astype(mx.float32).transpose(1, 0)[..., None]
+        # num_valid has shape (bs, 1)
+        num_valid = mx.clip(mx.sum(is_valid, axis=0), 1.0, None)
+        # mean pool over all the valid tokens -- pooled_prompt has shape (bs, proj_dim)
+        pooled_prompt = mx.sum(prompt * is_valid, axis=0) / num_valid
+        return pooled_prompt
+
+    def __call__(self, hs, prompt, prompt_mask):
+        # hs has shape (num_layer, bs, num_query, d_model)
+        # prompt has shape (seq, bs, d_model)
+        # prompt_mask has shape (bs, seq), where 1 is valid and 0 is padding
+        assert hs.ndim == 4 and prompt.ndim == 3 and prompt_mask.ndim == 2
+
+        # apply MLP on prompt if specified
+        if self.prompt_mlp is not None:
+            prompt = self.prompt_mlp(prompt)
+
+        # first, get the mean-pooled version of the prompt
+        pooled_prompt = self.mean_pool_text(prompt, prompt_mask)
+
+        # then, project pooled_prompt and hs to d_proj dimensions
+        proj_pooled_prompt = self.prompt_proj(pooled_prompt)  # (bs, d_proj)
+        proj_hs = self.hs_proj(hs)  # (num_layer, bs, num_query, d_proj)
+
+        # finally, get dot-product scores of shape (num_layer, bs, num_query, 1)
+        scores = mx.matmul(proj_hs, proj_pooled_prompt[..., None])
+        scores *= self.scale
+
+        # clamp scores to a max value to avoid numerical issues in loss or matcher
+        if self.clamp_logits:
+            scores = mx.clip(scores, -self.clamp_max_val, self.clamp_max_val)
+
+        return scores
+
 def drop_path(x, drop_prob: float = 0., training: bool = False, scale_by_keep: bool = True):
     # TODO: attribute timm for implementation reference
     if drop_prob == 0. or not training:
@@ -71,6 +129,44 @@ class DropPath(nn.Module):
     def extra_repr(self):
         return f'drop_prob={round(self.drop_prob,3):0.3f}'
 
+class TransformerWrapper(nn.Module):
+    def __init__(
+        self,
+		encoder,
+		decoder,
+		d_model: int,
+		two_stage_type="none",
+		pos_enc_at_input_dec=True,
+    ):
+        super().__init__()
+
+        self.encoder = encoder
+        self.decoder = decoder
+        self.num_queries = decoder.num_queries if decoder is not None else None
+        self.pos_enc_at_input_dec = pos_enc_at_input_dec
+
+        # for two stage
+        assert two_stage_type in ["none"], "unknown param {} of two_stage_type".format(
+            two_stage_type
+        )
+        self.two_stage_type = two_stage_type
+
+        self._reset_parameters()
+        self.d_model = d_model
+    
+    def _reset_parameters(self):
+        def _init_fn(path, params):
+            if params.ndim > 1:
+                if (
+                "box_embed" not in path
+                and "query_embed" not in path
+                and "reference_points" not in path
+            ):
+                    return nn.init.glorot_uniform()(params, 1.0)
+            return params
+ 
+        self.update(tree_map_with_path(_init_fn, self.parameters()))
+            
 class MLP(nn.Module):
     """Very simple multi-layer perceptron (also called FFN)"""
 

@@ -1,5 +1,8 @@
 import os
+
 import mlx.core as mx
+import mlx.nn as nn
+
 from sam3.model.sam3_image import Sam3Image
 from sam3.model.text_encoder_ve import VETextEncoder
 from sam3.model.tokenizer_ve import SimpleTokenizer
@@ -13,7 +16,10 @@ from sam3.model.decoder import (
     TransformerDecoderLayer
 )
 from sam3.model.model_misc import (
+    DotProductScoring,
+    MLP,
     MultiheadAttentionWrapper as MultiheadAttention,
+    TransformerWrapper
 )
 
 
@@ -139,12 +145,28 @@ def _create_transformer_decoder() -> TransformerDecoder:
     )
     return decoder
 
+def _create_dot_product_scoring():
+    """Create dot product scoring module."""
+    prompt_mlp = MLP(
+        input_dim=256,
+        hidden_dim=2048,
+        output_dim=256,
+        num_layers=2,
+        dropout=0.1,
+        residual=True,
+        out_norm=nn.LayerNorm(256),
+    )
+    return DotProductScoring(d_model=256, d_proj=256, prompt_mlp=prompt_mlp)
+
 def _create_sam3_model(
     backbone,
-    # transformer,
+    transformer,
+    dot_prod_scoring,
 ):
     common_params = {
         "backbone": backbone,
+        "transformer": transformer,
+        "dot_prod_scoring": dot_prod_scoring
     }
 
     model = Sam3Image(**common_params)
@@ -179,9 +201,11 @@ def _create_vision_backbone(
 
 def _create_sam3_transformer(has_presence_token: bool = True):
     # encoder
-    # decoder
-    # return wrapper
-    pass
+    encoder: TransformerEncoderFusion = _create_transformer_encoder()
+    decoder: TransformerDecoder = _create_transformer_decoder()
+
+    return TransformerWrapper(encoder=encoder, decoder=decoder, d_model=256)
+
 def load_checkpoint(model, checkpoint_path):
     weights = mx.load(checkpoint_path)
     try:
@@ -229,11 +253,16 @@ def build_sam3_image_model(
 
     backbone = _create_vl_backbone(vision_encoder, text_encoder)
 
-    # TODO: detr encoder, decoder
     transformer = _create_sam3_transformer()
 
+    dot_product_scoring = _create_dot_product_scoring()
 
-    model = _create_sam3_model(backbone)
+
+    model = _create_sam3_model(
+        backbone,
+        transformer,
+        dot_prod_scoring=dot_product_scoring
+    )
 
     breakpoint()
     load_checkpoint(model, checkpoint_path)
