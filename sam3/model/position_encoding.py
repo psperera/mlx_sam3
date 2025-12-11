@@ -51,11 +51,11 @@ class PositionEmbeddingSine(nn.Module):
         pos_x = mx.stack(
             (mx.sin(pos_x[:, 0::2]), mx.cos(pos_x[:, 1::2])),
             axis=2
-        )
+        ).flatten(1)
         pos_y = mx.stack(
             (mx.sin(pos_y[:, 0::2]), mx.cos(pos_y[:, 1::2])),
             axis=2
-        )
+        ).flatten(1)
         return pos_x, pos_y
     
     def encode_boxes(self, x, y, w, h):

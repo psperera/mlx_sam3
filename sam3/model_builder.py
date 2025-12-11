@@ -10,6 +10,7 @@ from sam3.model.vitdet import ViT
 from sam3.model.position_encoding import PositionEmbeddingSine
 from sam3.model.necks import Sam3DualViTDetNeck
 from sam3.model.vl_combiner import SAM3VLBackbone
+from sam3.model.geometry_encoders import SequenceGeometryEncoder
 from sam3.model.maskformer_segmentation import PixelDecoder, UniversalSegmentationHead
 from sam3.model.encoder import TransformerEncoderFusion, TransformerEncoderLayer
 from sam3.model.decoder import (
@@ -185,15 +186,61 @@ def _create_segmentation_head():
     )
     return segmentation_head
 
+def _create_geometry_encoder():
+    """Create geometry encoder with all its components."""
+    # Create position encoding for geometry encoder
+    geo_pos_enc = _create_position_encoding()
+   # Create geometry encoder layer
+    geo_layer = lambda: TransformerEncoderLayer(
+        activation="relu",
+        d_model=256,
+        dim_feedforward=2048,
+        dropout=0.1,
+        pos_enc_at_attn=False,
+        pre_norm=True,
+        self_attention=MultiheadAttention(
+            num_heads=8,
+            dims=256,
+        ),
+        pos_enc_at_cross_attn_queries=False,
+        pos_enc_at_cross_attn_keys=True,
+        cross_attention=MultiheadAttention(
+            num_heads=8,
+            dims=256,
+        ),
+    )
+
+    # Create geometry encoder
+    input_geometry_encoder = SequenceGeometryEncoder(
+        pos_enc=geo_pos_enc,
+        encode_boxes_as_points=False,
+        points_direct_project=True,
+        points_pool=True,
+        points_pos_enc=True,
+        boxes_direct_project=True,
+        boxes_pool=True,
+        boxes_pos_enc=True,
+        d_model=256,
+        num_layers=3,
+        layer=geo_layer,
+        use_act_ckpt=True,
+        add_cls=True,
+        add_post_encode_proj=True,
+    )
+    return input_geometry_encoder
 
 def _create_sam3_model(
     backbone,
     transformer,
+    input_geometry_encoder,
+    segmentation_head,
     dot_prod_scoring,
 ):
     common_params = {
         "backbone": backbone,
         "transformer": transformer,
+        "input_geometry_encoder": input_geometry_encoder,
+        "segmentation_head": segmentation_head,
         "dot_prod_scoring": dot_prod_scoring
     }
 
@@ -235,12 +282,15 @@ def _create_sam3_transformer(has_presence_token: bool = True):
     return TransformerWrapper(encoder=encoder, decoder=decoder, d_model=256)
 
 def load_checkpoint(model, checkpoint_path):
+    breakpoint()
     weights = mx.load(checkpoint_path)
     try:
-        model.load_weights(weights)
+        model.load_weights(weights, strict=True)
+        mx.eval(model.parameters())
     except ValueError as e:
         msg = str(e)
         
+        breakpoint()
         expected_missing = [
             "attn_mask", 
             "position_encoding.cache"
@@ -293,14 +343,17 @@ def build_sam3_image_model(
     )
 
     # geometry_encoder
+    input_geometry_encoder = _create_geometry_encoder()
 
     # enable interactivity ? tracker, sam3interactiveimagepredictor
+    inst_predictor = None
 
 
     model = _create_sam3_model(
         backbone,
         transformer,
-        segmentation_head=segmentation_head,
+        input_geometry_encoder,
+        segmentation_head,
         dot_prod_scoring=dot_product_scoring
     )
 

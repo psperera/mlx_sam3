@@ -76,6 +76,7 @@ def convert(model_path):
         # Vision Encoder
         if "detector" in k:
             k = k.replace("detector.", "")
+            # vision and language backbone
             if k.startswith("backbone."):
                 v = mx.array(v.numpy())
                 if k in {
@@ -103,7 +104,7 @@ def convert(model_path):
                 if k.endswith("in_proj_weight") or k.endswith("in_proj_bias"):
                     update_attn_keys(k, mlx_weights)
 
-            # transformer encoder, decoder
+            # transformer fusion encoder, detr decoder
             elif k.startswith("transformer."):
                 v = mx.array(v.numpy())
 
@@ -115,6 +116,32 @@ def convert(model_path):
             elif k.startswith("dot_prod_scoring."):
                 v = mx.array(v.numpy())
                 mlx_weights[k] = v
+            
+            # segmentation_head
+            elif k.startswith("segmentation_head."):
+                v = mx.array(v.numpy())
+                if k in {
+                    "segmentation_head.pixel_decoder.conv_layers.0.weight",
+                    "segmentation_head.pixel_decoder.conv_layers.1.weight",
+                    "segmentation_head.pixel_decoder.conv_layers.2.weight",
+                    "segmentation_head.semantic_seg_head.weight",
+                    "segmentation_head.instance_seg_head.weight",
+
+                }:
+                    v = v.transpose(0, 2, 3, 1)
+
+                mlx_weights[k] = v
+                if k.endswith("in_proj_weight") or k.endswith("in_proj_bias"):
+                    update_attn_keys(k, mlx_weights)
+            
+            # geometry encoder
+            elif k.startswith("geometry_encoder."):
+                v = mx.array(v.numpy())
+
+                mlx_weights[k] = v
+                if k.endswith("in_proj_weight") or k.endswith("in_proj_bias"):
+                    update_attn_keys(k, mlx_weights)
+
      
     return mlx_weights 
 
