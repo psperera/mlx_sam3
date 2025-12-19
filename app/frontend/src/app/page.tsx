@@ -12,6 +12,8 @@ import {
   XCircle,
   Sparkles,
   BoxSelect,
+  Timer,
+  Server,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +30,22 @@ import {
 
 type BoxMode = "positive" | "negative";
 
+interface TimingEntry {
+  label: string;
+  duration: number;
+  timestamp: Date;
+}
+
+function formatDuration(ms: number | undefined | null): string {
+  if (ms === undefined || ms === null || isNaN(ms)) {
+    return "—";
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`;
+  }
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -38,8 +56,28 @@ export default function Home() {
   const [boxMode, setBoxMode] = useState<BoxMode>("positive");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "offline">("checking");
+  const [backendStatus, setBackendStatus] = useState<
+    "checking" | "online" | "offline"
+  >("checking");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Timing state (server-side processing times)
+  const [timings, setTimings] = useState<TimingEntry[]>([]);
+  const [lastTiming, setLastTiming] = useState<TimingEntry | null>(null);
+
+  const addTiming = useCallback(
+    (label: string, duration: number | undefined | null) => {
+      // Only add timing if we have a valid duration from the server
+      if (duration === undefined || duration === null || isNaN(duration)) {
+        console.warn(`No timing data for: ${label}`);
+        return;
+      }
+      const entry: TimingEntry = { label, duration, timestamp: new Date() };
+      setLastTiming(entry);
+      setTimings((prev) => [entry, ...prev].slice(0, 10)); // Keep last 10
+    },
+    []
+  );
 
   // Check backend health on mount
   useEffect(() => {
@@ -52,38 +90,42 @@ export default function Home() {
       }
     };
     checkBackend();
-    const interval = setInterval(checkBackend, 5000);
+    const interval = setInterval(checkBackend, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleFileSelect = useCallback(async (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      setError("Please select an image file");
-      return;
-    }
+  const handleFileSelect = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith("image/")) {
+        setError("Please select an image file");
+        return;
+      }
 
-    setError(null);
-    setIsLoading(true);
+      setError(null);
+      setIsLoading(true);
 
-    try {
-      // Create preview URL
-      const url = URL.createObjectURL(file);
-      setImageUrl(url);
+      try {
+        // Create preview URL
+        const url = URL.createObjectURL(file);
+        setImageUrl(url);
 
-      // Upload to backend
-      const response = await uploadImage(file);
-      setSessionId(response.session_id);
-      setImageWidth(response.width);
-      setImageHeight(response.height);
-      setResult(null);
-      setTextPrompt("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to upload image");
-      setImageUrl(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+        // Upload to backend
+        const response = await uploadImage(file);
+        setSessionId(response.session_id);
+        setImageWidth(response.width);
+        setImageHeight(response.height);
+        setResult(null);
+        setTextPrompt("");
+        addTiming("Image Encoding", response.processing_time_ms);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to upload image");
+        setImageUrl(null);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [addTiming]
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -104,6 +146,7 @@ export default function Home() {
     try {
       const response = await segmentWithText(sessionId, textPrompt.trim());
       setResult(response.results);
+      addTiming(`Text: "${textPrompt.trim()}"`, response.processing_time_ms);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Segmentation failed");
     } finally {
@@ -119,15 +162,22 @@ export default function Home() {
       setIsLoading(true);
 
       try {
-        const response = await addBoxPrompt(sessionId, box, boxMode === "positive");
+        const response = await addBoxPrompt(
+          sessionId,
+          box,
+          boxMode === "positive"
+        );
         setResult(response.results);
+        addTiming(`Box (${boxMode})`, response.processing_time_ms);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to add box prompt");
+        setError(
+          err instanceof Error ? err.message : "Failed to add box prompt"
+        );
       } finally {
         setIsLoading(false);
       }
     },
-    [sessionId, boxMode]
+    [sessionId, boxMode, addTiming]
   );
 
   const handleReset = async () => {
@@ -140,6 +190,7 @@ export default function Home() {
       const response = await resetPrompts(sessionId);
       setResult(response.results);
       setTextPrompt("");
+      addTiming("Reset Prompts", response.processing_time_ms);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reset");
     } finally {
@@ -148,6 +199,16 @@ export default function Home() {
   };
 
   const maskCount = result?.masks?.length ?? 0;
+
+  // Calculate average inference time (excluding upload)
+  const inferenceTimings = timings.filter(
+    (t) => !t.label.includes("Upload") && !t.label.includes("Reset")
+  );
+  const avgInferenceTime =
+    inferenceTimings.length > 0
+      ? inferenceTimings.reduce((sum, t) => sum + t.duration, 0) /
+        inferenceTimings.length
+      : null;
 
   return (
     <main className="min-h-screen p-6 md:p-8">
@@ -165,7 +226,8 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
+            {/* Backend status */}
             {backendStatus === "checking" && (
               <div className="flex items-center gap-2 text-muted-foreground text-sm">
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -245,7 +307,10 @@ export default function Home() {
                   placeholder='e.g. "person", "dog"'
                   disabled={isLoading}
                 />
-                <Button type="submit" disabled={isLoading || !textPrompt.trim()}>
+                <Button
+                  type="submit"
+                  disabled={isLoading || !textPrompt.trim()}
+                >
                   {isLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
@@ -316,7 +381,9 @@ export default function Home() {
               {result?.prompted_boxes && result.prompted_boxes.length > 0 && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Box prompts:</span>
-                  <span className="font-medium">{result.prompted_boxes.length}</span>
+                  <span className="font-medium">
+                    {result.prompted_boxes.length}
+                  </span>
                 </div>
               )}
               <Button
@@ -329,6 +396,83 @@ export default function Home() {
                 <Trash2 className="w-4 h-4 mr-2" />
                 Clear All Prompts
               </Button>
+            </CardContent>
+          </Card>
+
+          {/* Performance Card */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Timer className="w-4 h-4" />
+                  Performance
+                </span>
+                <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                  <Server className="w-3 h-3" />
+                  server
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Last request timing with highlight */}
+              {lastTiming && (
+                <div className="bg-primary/10 border border-primary/20 rounded-lg p-3 animate-fade-in-up">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground truncate max-w-[180px]">
+                      {lastTiming.label}
+                    </span>
+                    <span className="text-sm font-bold text-primary">
+                      {formatDuration(lastTiming.duration)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Stats summary */}
+              {timings.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-card border border-border rounded p-2">
+                    <div className="text-muted-foreground">Requests</div>
+                    <div className="font-medium">{timings.length}</div>
+                  </div>
+                  {avgInferenceTime !== null && (
+                    <div className="bg-card border border-border rounded p-2">
+                      <div className="text-muted-foreground">Avg Inference</div>
+                      <div className="font-medium">
+                        {formatDuration(avgInferenceTime)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Recent requests log */}
+              {timings.length > 0 && (
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  <div className="text-xs text-muted-foreground mb-1">
+                    Recent:
+                  </div>
+                  {timings.slice(0, 5).map((timing, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between text-xs py-1 border-b border-border/50 last:border-0"
+                    >
+                      <span className="text-muted-foreground truncate max-w-[160px]">
+                        {timing.label}
+                      </span>
+                      <span className="font-mono text-foreground">
+                        {formatDuration(timing.duration)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {timings.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  No requests yet
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -387,4 +531,3 @@ export default function Home() {
     </main>
   );
 }
-

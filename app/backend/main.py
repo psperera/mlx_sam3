@@ -6,6 +6,7 @@ Provides endpoints for image upload, text prompts, box prompts, and segmentation
 import io
 import os
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -153,8 +154,10 @@ async def upload_image(file: UploadFile = File(...)):
         # Create session
         session_id = str(uuid.uuid4())
         
-        # Process image through model
+        # Process image through model (timed)
+        start_time = time.perf_counter()
         state = processor.set_image(image)
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
         
         # Store session with image info
         sessions[session_id] = {
@@ -166,7 +169,8 @@ async def upload_image(file: UploadFile = File(...)):
             "session_id": session_id,
             "width": image.size[0],
             "height": image.size[1],
-            "message": "Image uploaded and processed successfully"
+            "message": "Image uploaded and processed successfully",
+            "processing_time_ms": round(processing_time_ms, 2)
         }
     
     except Exception as e:
@@ -184,13 +188,16 @@ async def segment_with_text(request: TextPromptRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     
     try:
+        start_time = time.perf_counter()
         state = processor.set_text_prompt(request.prompt, session["state"])
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
         session["state"] = state
         
         return {
             "session_id": request.session_id,
             "prompt": request.prompt,
-            "results": serialize_state(state)
+            "results": serialize_state(state),
+            "processing_time_ms": round(processing_time_ms, 2)
         }
     
     except Exception as e:
@@ -228,13 +235,16 @@ async def add_box_prompt(request: BoxPromptRequest):
             "label": request.label
         })
         
+        start_time = time.perf_counter()
         state = processor.add_geometric_prompt(request.box, request.label, state)
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
         session["state"] = state
         
         return {
             "session_id": request.session_id,
             "box_type": "positive" if request.label else "negative",
-            "results": serialize_state(state)
+            "results": serialize_state(state),
+            "processing_time_ms": round(processing_time_ms, 2)
         }
     
     except Exception as e:
@@ -253,7 +263,10 @@ async def reset_prompts(request: SessionRequest):
     
     try:
         state = session["state"]
+        
+        start_time = time.perf_counter()
         processor.reset_all_prompts(state)
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
         
         if "prompted_boxes" in state:
             del state["prompted_boxes"]
@@ -261,7 +274,8 @@ async def reset_prompts(request: SessionRequest):
         return {
             "session_id": request.session_id,
             "message": "All prompts reset",
-            "results": serialize_state(state)
+            "results": serialize_state(state),
+            "processing_time_ms": round(processing_time_ms, 2)
         }
     
     except Exception as e:

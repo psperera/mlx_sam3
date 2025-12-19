@@ -5,6 +5,7 @@ export interface UploadResponse {
   width: number;
   height: number;
   message: string;
+  processing_time_ms: number;
 }
 
 export interface SegmentationResult {
@@ -21,41 +22,51 @@ export interface SegmentResponse {
   prompt?: string;
   box_type?: string;
   results: SegmentationResult;
+  processing_time_ms: number;
+}
+
+export interface ResetResponse {
+  session_id: string;
+  message: string;
+  results: SegmentationResult;
+  processing_time_ms: number;
+}
+
+// Helper to fetch with error handling
+async function apiFetch<T>(fetchFn: () => Promise<Response>): Promise<T> {
+  const response = await fetchFn();
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Request failed");
+  }
+  
+  return response.json();
 }
 
 export async function uploadImage(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch(`${API_BASE}/upload`, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Failed to upload image");
-  }
-
-  return response.json();
+  return apiFetch<UploadResponse>(() =>
+    fetch(`${API_BASE}/upload`, {
+      method: "POST",
+      body: formData,
+    })
+  );
 }
 
 export async function segmentWithText(
   sessionId: string,
   prompt: string
 ): Promise<SegmentResponse> {
-  const response = await fetch(`${API_BASE}/segment/text`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, prompt }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Failed to segment");
-  }
-
-  return response.json();
+  return apiFetch<SegmentResponse>(() =>
+    fetch(`${API_BASE}/segment/text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, prompt }),
+    })
+  );
 }
 
 export async function addBoxPrompt(
@@ -63,40 +74,28 @@ export async function addBoxPrompt(
   box: number[],
   label: boolean
 ): Promise<SegmentResponse> {
-  const response = await fetch(`${API_BASE}/segment/box`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, box, label }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Failed to add box prompt");
-  }
-
-  return response.json();
+  return apiFetch<SegmentResponse>(() =>
+    fetch(`${API_BASE}/segment/box`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, box, label }),
+    })
+  );
 }
 
-export async function resetPrompts(sessionId: string): Promise<SegmentResponse> {
-  const response = await fetch(`${API_BASE}/reset`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Failed to reset");
-  }
-
-  return response.json();
+export async function resetPrompts(sessionId: string): Promise<ResetResponse> {
+  return apiFetch<ResetResponse>(() =>
+    fetch(`${API_BASE}/reset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId }),
+    })
+  );
 }
 
 export async function checkHealth(): Promise<{ status: string; model_loaded: boolean }> {
-  const response = await fetch(`${API_BASE}/health`);
-  if (!response.ok) {
-    throw new Error("Backend not available");
-  }
-  return response.json();
+  return apiFetch<{ status: string; model_loaded: boolean }>(() =>
+    fetch(`${API_BASE}/health`)
+  );
 }
 
