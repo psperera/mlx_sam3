@@ -9,6 +9,18 @@ An interactive web application for image segmentation using the SAM3 model. Feat
 - **Real-time Visualization**: See segmentation masks and bounding boxes overlaid on your image
 - **Session Management**: Multiple users can use the app simultaneously
 
+## Links
+
+- **GitHub Repository**: [Deekshith-Dade/mlx_sam3](https://github.com/Deekshith-Dade/mlx_sam3)
+- **Blog Post**: [Understanding SAM3](https://deekshith.me/blog/mlx-sam3)
+- **Original SAM3**: [facebook/sam3](https://huggingface.co/facebook/sam3)
+
+## Acknowledgments
+
+- Meta AI for the original SAM3 model
+- Apple MLX Team for the MLX framework
+- The open-source community for continuous inspiration
+
 ## Architecture
 
 ```
@@ -39,9 +51,9 @@ cd app
 ```
 
 This will start:
-- **Backend**: http://localhost:8000
+- **Backend**: http://localhost:8090
 - **Frontend**: http://localhost:3000
-- **API Docs**: http://localhost:8000/docs
+- **API Docs**: http://localhost:8090/docs
 
 Press `Ctrl+C` to stop both servers.
 
@@ -63,7 +75,7 @@ pip install -r requirements.txt
 ```bash
 python main.py
 # Or with uvicorn directly:
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8090 --reload
 ```
 
 The backend will load the SAM3 model on startup (this may take a minute).
@@ -110,7 +122,7 @@ npm run dev
 
 ### Frontend
 
-- `NEXT_PUBLIC_API_URL`: Backend API URL (default: `http://localhost:8000`)
+- `NEXT_PUBLIC_API_URL`: Backend API URL (default: `http://localhost:8090`)
 
 ## Development
 

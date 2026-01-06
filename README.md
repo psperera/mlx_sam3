@@ -95,8 +95,8 @@ The first run will automatically download MLX weights from [mlx-community/sam3-i
 
 **Access the app:**
 - 🌐 **Frontend**: http://localhost:3000
-- 🔌 **API**: http://localhost:8000
-- 📚 **API Docs**: http://localhost:8000/docs
+- 🔌 **API**: http://localhost:8090
+- 📚 **API Docs**: http://localhost:8090/docs
 
 Press `Ctrl+C` to stop all servers.
 
@@ -130,7 +130,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The backend will start on http://localhost:8000
+The backend will start on http://localhost:8090
 
 #### 3. Start the Frontend (new terminal)
 
@@ -237,13 +237,13 @@ mlx-sam3/
 
 ```bash
 # Upload an image
-curl -X POST "http://localhost:8000/upload" \
+curl -X POST "http://localhost:8090/upload" \
   -F "file=@your_image.jpg"
 
 # Response: {"session_id": "abc-123", "width": 1920, "height": 1080, ...}
 
 # Segment with text
-curl -X POST "http://localhost:8000/segment/text" \
+curl -X POST "http://localhost:8090/segment/text" \
   -H "Content-Type: application/json" \
   -d '{"session_id": "abc-123", "prompt": "car"}'
 ```
