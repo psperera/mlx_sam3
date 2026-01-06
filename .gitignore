@@ -1,3 +1,25 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual envs
+.venv/
+venv/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Jupyter
+.ipynb_checkpoints/
+
 # Python-generated files
 __pycache__/
 *.py[oc]
